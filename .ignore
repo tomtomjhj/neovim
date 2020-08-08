@@ -1,0 +1,6 @@
+install
+po
+*.patch
+testdir
+test
+runtime/doc
