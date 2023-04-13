@@ -359,7 +359,7 @@ function LanguageTree:_parse_regions(range)
 
         self:_do_callback('changedtree', cb_changes, tree)
         self._trees[i] = tree
-        vim.list_extend(changes, tree_changes)
+        vim.list_extend(changes, cb_changes)
 
         self._stats.regions_parsed = self._stats.regions_parsed + 1
         self._valid[i] = true
@@ -373,6 +373,10 @@ end
 --- @private
 function LanguageTree:_add_injections()
   self._stats.query_time = tcall(function()
+    if #self._stats.changes == 0 then
+      return
+    end
+
     local seen_langs = {} ---@type table<string,boolean>
     for lang, injection_regions in pairs(self:_get_injections()) do
       if pcall(language.add, lang) then
@@ -621,6 +625,17 @@ function LanguageTree:set_included_regions(new_regions)
   self._regions = new_regions
 end
 
+--- @param rs Range6[]
+--- @return Range6[]
+local function prune_empty_ranges(rs)
+  return vim.iter(rs):filter(
+    --- @param r Range6
+    function(r)
+      return r[3] ~= r[6]
+    end
+  ):totable()
+end
+
 ---Gets the set of included regions managed by this LanguageTree. This can be different from the
 ---regions set by injection query, because a partial |LanguageTree:parse()| drops the regions
 ---outside the requested range.
@@ -635,11 +650,17 @@ function LanguageTree:included_regions()
     return { {} }
   end
 
-  local regions = {} ---@type Range6[][]
-  for i, _ in pairs(self._trees) do
-    regions[i] = self._trees[i]:included_ranges(true)
+  local trees = {} ---@type table<integer, TSTree>
+  local regions = {} ---@type table<integer, Range6[]>
+  for i, tree in pairs(self._trees) do
+    local rs = prune_empty_ranges(tree:included_ranges(true))
+    if #rs > 0 then
+      trees[i] = tree
+      regions[i] = rs
+    end
   end
 
+  self._trees = trees
   self._regions = regions
   return regions
 end
