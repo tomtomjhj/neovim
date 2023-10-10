@@ -5,6 +5,7 @@
   },
   "workspace": {
     "ignoreDir": [
+      "install",
       ".deps",
       "build"
     ],
