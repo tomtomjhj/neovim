@@ -3,26 +3,42 @@
 --- For example a Lua buffer containing some Vimscript commands needs multiple parsers to fully
 --- understand its contents.
 ---
+--- Each parser in a LanguageTree manages a set of regions in the source. Each region is a set of
+--- ranges. The root parser usually does not have an explicit region (this is represented by having
+--- a single empty region), which means that the parser manages the full source. Injected parsers
+--- have the regions for each region captured by injection query.
+---
 --- To create a LanguageTree (parser object) for a given buffer and language, use:
 ---
 --- ```lua
 --- local parser = vim.treesitter.get_parser(bufnr, lang)
 --- ```
 ---
---- (where `bufnr=0` means current buffer). `lang` defaults to 'filetype'.
+--- `bufnr=0` means current buffer, and `lang` defaults to 'filetype'.
 --- Note: currently the parser is retained for the lifetime of a buffer but this may change;
 --- a plugin should keep a reference to the parser object if it wants incremental updates.
 ---
---- Whenever you need to access the current syntax tree, parse the buffer:
+--- Whenever you need to access the current syntax tree(s), first parse the buffer:
 ---
 --- ```lua
---- local tree = parser:parse({ start_row, end_row })
+--- local tree = parser:parse(true)[1]
 --- ```
 ---
---- This returns a table of immutable |treesitter-tree| objects representing the current state of
---- the buffer. When the plugin wants to access the state after a (possible) edit it must call
---- `parse()` again. If the buffer wasn't edited, the same tree will be returned again without extra
---- work. If the buffer was parsed before, incremental parsing will be done of the changed parts.
+--- This parses full source and produces immutable |treesitter-tree| objects for each region of each
+--- parser in `parser`.
+--- Alterntively, you can use the table retuned by `parse()` if you only need the tree for the root
+--- parser.
+--- The parsed trees can be accessed with |LanguageTree:for_each_tree()|.
+---
+--- ```lua
+--- parser:for_each_tree(function(tree)
+---   -- ...
+--- end)
+--- ```
+---
+--- When a plugin wants to access the state after a (possible) edit it must call `parse()` again.
+--- If the buffer wasn't edited, the same tree will be returned again without extra work. If the
+--- buffer was parsed before, only the changed parts will be parsed incrementally.
 ---
 --- Note: To use the parser directly inside a |nvim_buf_attach()| Lua callback, you must call
 --- |vim.treesitter.get_parser()| before you register your callback. But preferably parsing
@@ -410,8 +426,12 @@ end
 --- for the corresponding languages and run injection queries on the parsed trees
 --- to determine whether child trees should be created and parsed.
 ---
---- Any region with empty range (`{}`, typically only the root tree) is always parsed;
---- otherwise (typically injections) only if it intersects {range} (or if {range} is `true`).
+--- For example, `{ start_row, end_row }` 0-indexed, end-exclusive
+---
+--- If the parser's region is unspecified (represented by having an empty region; typically only the
+--- root), the full source is parsed.
+--- Otherwise (typically injections), the only the regions that intersect {range} are parsed.
+--- If {range} is `true`, all regions are parsed.
 ---
 --- @param range boolean|Range|nil: Parse this range in the parser's source.
 ---     Set to `true` to run a complete parse of the source (Note: Can be slow!)
@@ -478,7 +498,7 @@ function LanguageTree:for_each_child(fn, include_self)
   end
 end
 
---- Invokes the callback for each |LanguageTree| recursively.
+--- Invokes the callback for each parsed trees of all the parsers recursively.
 ---
 --- Note: This includes the invoking tree's child trees as well.
 ---

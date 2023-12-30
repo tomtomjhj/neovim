@@ -811,6 +811,7 @@ end
 
 ---@private
 ---@param match vim.treesitter.query.TSMatch
+---@param pattern integer
 ---@param metadata vim.treesitter.query.TSMetadata
 function Query:apply_directives(match, pattern, source, metadata)
   local preds = self.info.patterns[pattern]
