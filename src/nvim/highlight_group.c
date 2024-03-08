@@ -891,7 +891,6 @@ void set_hl_group(int id, HlAttrs attrs, Dict(highlight) *dict, int link_id)
   bool is_default = attrs.rgb_ae_attr & HL_DEFAULT;
 
   HlGroup *g = &hl_table[idx];
-  g->sg_cleared = false;
 
   if (is_default) {
     if (link_id > 0 && (dict->force || g->sg_deflink == 0)) {
@@ -901,10 +900,12 @@ void set_hl_group(int id, HlAttrs attrs, Dict(highlight) *dict, int link_id)
       nlua_set_sctx(&g->sg_deflink_sctx);
     }
 
-    if (hl_has_settings(idx, true) && !dict->force) {
+    if (hl_has_settings(idx, true) && !dict->force && !g->sg_cleared) {
       return;
     }
   }
+
+  g->sg_cleared = false;
 
   if (link_id > 0) {
     g->sg_link = link_id;
