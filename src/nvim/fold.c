@@ -778,7 +778,8 @@ void clearFolding(win_T *win)
 /// The changes in lines from top to bot (inclusive).
 void foldUpdate(win_T *wp, linenr_T top, linenr_T bot)
 {
-  if (disable_fold_update || (State & MODE_INSERT && !foldmethodIsIndent(wp))) {
+  if (disable_fold_update
+      || (State & MODE_INSERT && !foldmethodIsIndent(wp) && !foldmethodIsDiff(wp))) {
     return;
   }
 
@@ -829,7 +830,8 @@ void foldUpdateAfterInsert(void)
   }
 
   foldUpdateAll(curwin);
-  foldOpenCursor();
+  checkupdate(curwin);
+  // TODO: when the diff fold closes, cursor position is wrong.. not related to insert mode
 }
 
 // foldUpdateAll() {{{2
