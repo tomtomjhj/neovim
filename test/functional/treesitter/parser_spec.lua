@@ -831,6 +831,31 @@ int x = INT_MAX;
     ]]
     )
 
+    --- Don't discard trees during a batch
+    eq(
+      2,
+      exec_lua [[
+      parser:invalidate()
+      parser:_start_batch()
+      parser:parse({0, 2})
+      parser:parse({2, 6})
+      parser:_finish_batch()
+      return vim.tbl_count(parser:children().lua:trees())
+    ]]
+    )
+
+    -- Retain children in range even if nothing is actually parsed
+    eq(
+      2,
+      exec_lua [[
+      parser:_start_batch()
+      parser:parse({0, 2})
+      parser:parse({2, 6})
+      parser:_finish_batch()
+      return vim.tbl_count(parser:children().lua:trees())
+    ]]
+    )
+
     eq(
       7,
       exec_lua [[

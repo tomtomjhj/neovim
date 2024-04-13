@@ -8,6 +8,7 @@ local feed = t.feed
 local command = t.command
 local api = t.api
 local eq = t.eq
+local poke_eventloop = t.poke_eventloop
 
 before_each(clear)
 
@@ -886,6 +887,9 @@ describe('treesitter highlighting (help)', function()
     }
 
     t.api.nvim_buf_set_text(0, 0, 1, 0, 4, { 'ruby' })
+    -- With batching, children parsers are removed at the end of a redraw cycle, so the change will
+    -- be reflected in the next redraw.
+    poke_eventloop()
 
     screen:expect {
       grid = [[

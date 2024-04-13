@@ -101,9 +101,31 @@ local TSCallbackNames = {
 ---
 ---@field private _valid boolean|table<integer,boolean> If the parsed tree is valid
 ---@field private _has_combined_injection boolean
+---@field private _batch vim.treesitter.LanguageTree.ParseBatchState?
 ---@field private _logger? fun(logtype: string, msg: string)
 ---@field private _logfile? file*
 local LanguageTree = {}
+
+---With partial injection query execution, `parse(range)` discards stale regions, trees, and
+---children parsers that do not belong to `range`. That is, a subsequent invocation of `parse()`
+---with different range may discard the result of previous `parse()`. This is inefficient when
+---the treesitter highlighter handles multiple windows that show the same buffer. To improve
+---efficiency, the cleanup of stale things should be deferred until the entire batch of `parse()`
+---invocations are finished.
+--
+---A minor side effect of batching is that the stale highlights are cleared in the next redraw
+---cycle. However, this is not noticeable to users because the cleanup schedules a redraw via the
+---highlighter's on_changedtree handler.
+---@nodoc
+---@class vim.treesitter.LanguageTree.ParseBatchState
+---
+---Regions that have been `set_included_regions`-ed during the batch. nil if `set_included_regions`
+---has not run. A region is stale if `touched` is not nil and the region is not in `touched`.
+---@field touched table<integer, true>?
+---
+---Injected languages seen during the batch. nil if injection has not run. A child language is stale
+---if `seen_langs` is not nil and the language is not in `seen_langs`.
+---@field seen_langs table<string, true>?
 
 ---Optional arguments:
 ---@class vim.treesitter.LanguageTree.new.Opts
@@ -413,7 +435,15 @@ end
 --- @param range boolean|Range|nil
 --- @return number
 function LanguageTree:_add_injections(range)
-  local seen_langs = {} ---@type table<string,boolean>
+  local seen_langs ---@type table<string,boolean>
+  if self._batch then
+    if not self._batch.seen_langs then
+      self._batch.seen_langs = {}
+    end
+    seen_langs = assert(self._batch.seen_langs)
+  else
+    seen_langs = {}
+  end
 
   local query_time, injections_by_lang = tcall(self._get_injections, self, range)
   for lang, injection_regions in pairs(injections_by_lang) do
@@ -434,9 +464,12 @@ function LanguageTree:_add_injections(range)
     end
   end
 
-  for lang, _ in pairs(self._children) do
-    if not seen_langs[lang] then
-      self:remove_child(lang)
+  -- Discard unseen languages. If batched, defer it to _finish_batch.
+  if not self._batch then
+    for lang, _ in pairs(self._children) do
+      if not seen_langs[lang] then
+        self:remove_child(lang)
+      end
     end
   end
 
@@ -758,6 +791,49 @@ function LanguageTree:_discard_region(i)
   end
 end
 
+-- Start collecting things to be cleaned up.
+function LanguageTree:_start_batch()
+  self:_log('start batch')
+  self._batch = {}
+  for _, child in pairs(self._children) do
+    child:_start_batch()
+  end
+end
+
+-- Process the batch of deferred cleanup.
+function LanguageTree:_finish_batch()
+  -- If this parser was newly created during the batch, there's nothing to cleanup.
+  if not self._batch then
+    return
+  end
+
+  self:_log('finish batch', (self._batch.touched or self._batch.seen_langs) and self._batch)
+
+  -- Discard stale regions.
+  if self._batch.touched then
+    for i, _ in pairs(self._trees) do
+      if not self._batch.touched[i] then
+        self:_discard_region(i)
+      end
+    end
+  end
+
+  -- Discard stale children parsers
+  if self._batch.seen_langs then
+    for lang, _ in pairs(self._children) do
+      if not self._batch.seen_langs[lang] then
+        self:remove_child(lang)
+      end
+    end
+  end
+
+  self._batch = nil
+
+  for _, child in pairs(self._children) do
+    child:_finish_batch()
+  end
+end
+
 --- Sets the included regions that should be parsed by this |LanguageTree|.
 --- A region is a set of nodes and/or ranges that will be parsed in the same context.
 ---
@@ -780,7 +856,15 @@ function LanguageTree:set_included_regions(new_regions)
   -- Refresh self._regions and self._regions_inv
   self:included_regions()
 
-  local touched = {} ---@type table<integer, true>
+  local touched ---@type table<integer, true>
+  if self._batch then
+    if not self._batch.touched then
+      self._batch.touched = {}
+    end
+    touched = assert(self._batch.touched)
+  else
+    touched = {}
+  end
 
   -- For each region, check if the parser already has a similar region so that they can be parsed
   -- incrementally. This check doesn't need to be precise.
@@ -819,10 +903,12 @@ function LanguageTree:set_included_regions(new_regions)
     touched[i] = true
   end
 
-  -- Discard stale regions.
-  for i, _ in pairs(self._regions) do
-    if not touched[i] then
-      self:_discard_region(i)
+  -- Discard stale regions. If batched, defer it to _finish_batch.
+  if not self._batch then
+    for i, _ in pairs(self._regions) do
+      if not touched[i] then
+        self:_discard_region(i)
+      end
     end
   end
 end
