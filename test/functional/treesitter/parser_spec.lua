@@ -252,20 +252,25 @@ end]]
     local root = parser:parse()[1]:root()
     parser:set_included_regions({{root:child(0)}})
     parser:invalidate()
-    return { parser:parse(true)[1]:root():range() }
+    local _, tree = next(parser:parse(true))
+    return { tree:root():range() }
     ]]
 
     eq({ 0, 0, 18, 1 }, res2)
 
-    eq({ { { 0, 0, 0, 18, 1, 512 } } }, exec_lua [[ return parser:included_regions() ]])
+    eq(
+      { { { 0, 0, 0, 18, 1, 512 } } },
+      exec_lua [[return vim.tbl_values(parser:included_regions())]]
+    )
 
-    local range_tbl = exec_lua [[
+    eq(
+      { { { 0, 0, 0, 17, 1, 508 } } },
+      exec_lua [[
       parser:set_included_regions { { { 0, 0, 17, 1 } } }
       parser:parse()
-      return parser:included_regions()
+      return vim.tbl_values(parser:included_regions())
     ]]
-
-    eq({ { { 0, 0, 0, 17, 1, 508 } } }, range_tbl)
+    )
   end)
 
   it('allows to set complex ranges', function()
@@ -282,7 +287,8 @@ end]]
 
     parser:set_included_regions({nodes})
 
-    local root = parser:parse(true)[1]:root()
+    local _, tree = next(parser:parse(true))
+    local root = tree:root()
 
     local res = {}
     for i=0,(root:named_child_count() - 1) do
@@ -812,7 +818,7 @@ int x = INT_MAX;
       1,
       exec_lua [[
       parser:parse({0, 2})
-      return #parser:children().lua:trees()
+      return vim.tbl_count(parser:children().lua:trees())
     ]]
     )
 
@@ -820,7 +826,7 @@ int x = INT_MAX;
       2,
       exec_lua [[
       parser:parse({2, 6})
-      return #parser:children().lua:trees()
+      return vim.tbl_count(parser:children().lua:trees())
     ]]
     )
 
@@ -828,9 +834,104 @@ int x = INT_MAX;
       7,
       exec_lua [[
       parser:parse(true)
-      return #parser:children().lua:trees()
+      return vim.tbl_count(parser:children().lua:trees())
     ]]
     )
+  end)
+
+  it('reuses similar existing regions', function()
+    insert(dedent [[
+      * line1
+        line2]])
+
+    exec_lua [[
+      parser = vim.treesitter.get_parser(0, "markdown", {
+        injections = {
+          markdown = '((inline) @injection.content (#set! injection.language "markdown_inline"))'
+        }
+      })
+    ]]
+
+    local function get_regions()
+      return exec_lua [[
+        parser:parse(true)
+        local result = {}
+        for i, tree in pairs(parser:children().markdown_inline:trees()) do
+          result[i] = tree:included_ranges()
+        end
+        return result
+      ]]
+    end
+
+    eq({
+      [1] = { { 0, 2, 1, 0 }, { 1, 2, 1, 7 } },
+    }, get_regions())
+
+    feed('2ggyyp')
+    -- region index does not change
+    eq({
+      [1] = { { 0, 2, 1, 0 }, { 1, 2, 2, 0 }, { 2, 2, 2, 7 } },
+    }, get_regions())
+
+    feed('2ggdd')
+    eq({
+      [1] = { { 0, 2, 1, 0 }, { 1, 2, 1, 7 } },
+    }, get_regions())
+
+    feed('ggyGP')
+    -- the old region moves while maintaining its index
+    eq({
+      [1] = { { 2, 2, 3, 0 }, { 3, 2, 3, 7 } },
+      [2] = { { 0, 2, 1, 0 }, { 1, 2, 1, 7 } },
+    }, get_regions())
+  end)
+
+  it("recursively discards children's regions contained in a parent's discarded region", function()
+    insert(dedent [[
+      `return`
+
+      ```
+      line 4
+      ```
+      line 6 `return`
+      ```]])
+
+    exec_lua [[
+      parser = vim.treesitter.get_parser(0, "markdown", {
+        injections = {
+          -- inject code span to lua
+          markdown_inline = '((code_span) @injection.content (#offset! @injection.content 0 1 0 -1) (#set! injection.language "lua"))'
+        }
+      })
+    ]]
+
+    local function get_regions()
+      return exec_lua [[
+        parser:parse(true)
+        local result = {}
+        for i, tree in pairs(parser:children().markdown_inline:children().lua:trees()) do
+          result[i] = tree:included_ranges()
+        end
+        return result
+      ]]
+    end
+
+    -- Initially, "line 4" is in the fenced code block, and "line 6 `return`" is a normal paragraph
+    -- with a inline code span.
+    eq({
+      [1] = { { 0, 1, 0, 7 } },
+      [2] = { { 5, 8, 5, 14 } },
+    }, get_regions())
+
+    -- Extend the code block to "line 6 `return`". Note that the only effect to markdown_inline
+    -- parser is removing a region, so it does not parse anything in markdown_inline parser.
+    feed('5ggD')
+    -- Despite not parsing at the parent (markdown_inline) parser, the regions in children (lua)
+    -- parser that are included in the parent's removed region should be removed as well.
+    -- The "`return`" at the first line is just for preventing the lua parser from being removed.
+    eq({
+      [1] = { { 0, 1, 0, 7 } },
+    }, get_regions())
   end)
 
   describe('languagetree is_valid()', function()
@@ -843,10 +944,8 @@ int x = INT_MAX;
 
       ]])
 
-      feed(':set ft=help<cr>')
-
       exec_lua [[
-        vim.treesitter.get_parser(0, "vimdoc", {
+        parser = vim.treesitter.get_parser(0, "vimdoc", {
           injections = {
             vimdoc = "((codeblock (language) @injection.language (code) @injection.content) (#set! injection.include-children))"
           }
@@ -854,21 +953,34 @@ int x = INT_MAX;
       ]]
     end)
 
+    local function get_regions()
+      return exec_lua [[
+        if not parser:children().lua then
+          return nil
+        end
+        local result = {}
+        for i, tree in pairs(parser:children().lua:trees()) do
+          result[i] = tree:included_ranges()
+        end
+        return result
+      ]]
+    end
+
     it('is valid excluding, invalid including children initially', function()
-      eq(true, exec_lua('return vim.treesitter.get_parser():is_valid(true)'))
-      eq(false, exec_lua('return vim.treesitter.get_parser():is_valid()'))
+      eq(true, exec_lua('return parser:is_valid(true)'))
+      eq(false, exec_lua('return parser:is_valid()'))
     end)
 
     it('is fully valid after a full parse', function()
-      exec_lua('vim.treesitter.get_parser():parse(true)')
-      eq(true, exec_lua('return vim.treesitter.get_parser():is_valid(true)'))
-      eq(true, exec_lua('return vim.treesitter.get_parser():is_valid()'))
+      exec_lua('parser:parse(true)')
+      eq(true, exec_lua('return parser:is_valid(true)'))
+      eq(true, exec_lua('return parser:is_valid()'))
     end)
 
     it('is fully valid after a parsing a range on parsed tree', function()
       exec_lua('vim.treesitter.get_parser():parse({5, 7})')
-      eq(true, exec_lua('return vim.treesitter.get_parser():is_valid(true)'))
-      eq(true, exec_lua('return vim.treesitter.get_parser():is_valid()'))
+      eq(true, exec_lua('return parser:is_valid(true)'))
+      eq(true, exec_lua('return parser:is_valid()'))
     end)
 
     describe('when adding content with injections', function()
@@ -883,36 +995,36 @@ int x = INT_MAX;
       end)
 
       it('is fully invalid after changes', function()
-        eq(false, exec_lua('return vim.treesitter.get_parser():is_valid(true)'))
-        eq(false, exec_lua('return vim.treesitter.get_parser():is_valid()'))
+        eq(false, exec_lua('return parser:is_valid(true)'))
+        eq(false, exec_lua('return parser:is_valid()'))
       end)
 
       it('is valid excluding, invalid including children after a rangeless parse', function()
-        exec_lua('vim.treesitter.get_parser():parse()')
-        eq(true, exec_lua('return vim.treesitter.get_parser():is_valid(true)'))
-        eq(false, exec_lua('return vim.treesitter.get_parser():is_valid()'))
+        exec_lua('parser:parse()')
+        eq(true, exec_lua('return parser:is_valid(true)'))
+        eq(false, exec_lua('return parser:is_valid()'))
       end)
 
       it(
         'is fully valid after a range parse that leads to parsing not parsed injections',
         function()
-          exec_lua('vim.treesitter.get_parser():parse({5, 7})')
-          eq(true, exec_lua('return vim.treesitter.get_parser():is_valid(true)'))
-          eq(true, exec_lua('return vim.treesitter.get_parser():is_valid()'))
+          exec_lua('parser:parse({5, 7})')
+          eq(true, exec_lua('return parser:is_valid(true)'))
+          eq(true, exec_lua('return parser:is_valid()'))
         end
       )
 
       it(
         'is valid excluding, invalid including children after a range parse that does not lead to parsing not parsed injections',
         function()
-          exec_lua('vim.treesitter.get_parser():parse({2, 4})')
-          eq(true, exec_lua('return vim.treesitter.get_parser():is_valid(true)'))
-          eq(false, exec_lua('return vim.treesitter.get_parser():is_valid()'))
+          exec_lua('parser:parse({2, 4})')
+          eq(true, exec_lua('return parser:is_valid(true)'))
+          eq(false, exec_lua('return parser:is_valid()'))
         end
       )
     end)
 
-    describe('when removing content with injections', function()
+    describe('when removing an injection region', function()
       before_each(function()
         feed('G')
         insert(dedent [[
@@ -921,41 +1033,67 @@ int x = INT_MAX;
           <
 
           >lua
-            local a = {}
+            local b = {}
           <
 
         ]])
 
-        exec_lua('vim.treesitter.get_parser():parse(true)')
+        exec_lua('parser:parse(true)')
+        eq({ [1] = { { 6, 0, 7, 0 } }, [2] = { { 10, 0, 11, 0 } } }, get_regions())
 
         feed('Gd3k')
+        -- the empty region is pruned
+        eq({ [1] = { { 6, 0, 7, 0 } } }, get_regions())
       end)
 
       it('is fully invalid after changes', function()
-        eq(false, exec_lua('return vim.treesitter.get_parser():is_valid(true)'))
-        eq(false, exec_lua('return vim.treesitter.get_parser():is_valid()'))
+        eq(false, exec_lua('return parser:is_valid(true)'))
+        eq(false, exec_lua('return parser:is_valid()'))
       end)
 
       it('is valid excluding, invalid including children after a rangeless parse', function()
-        exec_lua('vim.treesitter.get_parser():parse()')
-        eq(true, exec_lua('return vim.treesitter.get_parser():is_valid(true)'))
-        eq(false, exec_lua('return vim.treesitter.get_parser():is_valid()'))
+        exec_lua('parser:parse()')
+        eq(true, exec_lua('return parser:is_valid(true)'))
+        eq(false, exec_lua('return parser:is_valid()'))
       end)
 
-      it('is fully valid after a range parse that leads to parsing modified child tree', function()
-        exec_lua('vim.treesitter.get_parser():parse({5, 7})')
-        eq(true, exec_lua('return vim.treesitter.get_parser():is_valid(true)'))
-        eq(true, exec_lua('return vim.treesitter.get_parser():is_valid()'))
+      it('is fully valid after a range parse that includes injection region', function()
+        exec_lua('parser:parse({5, 7})')
+        eq(true, exec_lua('return parser:is_valid(true)'))
+        eq(true, exec_lua('return parser:is_valid()'))
+      end)
+    end)
+
+    describe('when editing an injection region', function()
+      before_each(function()
+        feed('G')
+        insert(dedent [[
+          >lua
+            local a = 1
+          <
+        ]])
+
+        exec_lua('parser:parse(true)')
+
+        feed('G2kA<BS>2<ESC>') -- 1 → 2
       end)
 
-      it(
-        'is valid excluding, invalid including children after a range parse that does not lead to parsing modified child tree',
-        function()
-          exec_lua('vim.treesitter.get_parser():parse({2, 4})')
-          eq(true, exec_lua('return vim.treesitter.get_parser():is_valid(true)'))
-          eq(false, exec_lua('return vim.treesitter.get_parser():is_valid()'))
-        end
-      )
+      it('is fully invalid after changes', function()
+        eq(false, exec_lua('return parser:is_valid(true)'))
+        eq(false, exec_lua('return parser:is_valid()'))
+      end)
+
+      it('is valid excluding, invalid including children after a rangeless parse', function()
+        exec_lua('parser:parse()')
+        eq(true, exec_lua('return parser:is_valid(true)'))
+        eq(false, exec_lua('return parser:is_valid()'))
+      end)
+
+      it('is fully valid after a range parse that includes modified region', function()
+        exec_lua('parser:parse({5, 7})')
+        eq(true, exec_lua('return parser:is_valid(true)'))
+        eq(true, exec_lua('return parser:is_valid()'))
+      end)
     end)
   end)
 end)
