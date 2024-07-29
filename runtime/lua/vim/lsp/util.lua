@@ -2145,7 +2145,7 @@ local function make_line_range_params(bufnr, start_line, end_line, offset_encodi
   ---@type lsp.Position
   local end_pos
 
-  if end_line == last_line and not vim.api.nvim_get_option_value('endofline', { buf = bufnr }) then
+  if end_line == last_line then
     end_pos = {
       line = end_line,
       character = M.character_offset(bufnr, end_line, #get_line(bufnr, end_line), offset_encoding),
