@@ -28,6 +28,11 @@ local function query_definition(pattern)
   end
   local results = {}
   local add = function(range, uri, offset_encoding)
+    -- filter out useless definition from LuaLS
+    -- https://github.com/LuaLS/lua-language-server/pull/2792
+    if uri:match(vim.pesc('LuaJIT%20en-us%20utf8/builtin.lua')) then
+      return
+    end
     table.insert(results, mk_tag_item(pattern, range, uri, offset_encoding))
   end
   for client_id, lsp_results in pairs(assert(results_by_client)) do
