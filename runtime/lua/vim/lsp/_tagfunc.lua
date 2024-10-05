@@ -34,6 +34,11 @@ local function query_definition(pattern)
   --- @param uri string
   --- @param position_encoding string
   local add = function(range, uri, position_encoding)
+    -- filter out useless definition from LuaLS
+    -- https://github.com/LuaLS/lua-language-server/pull/2792
+    if uri:match(vim.pesc('LuaJIT%20en-us%20utf8/builtin.lua')) then
+      return
+    end
     table.insert(results, mk_tag_item(pattern, range, uri, position_encoding))
   end
 
