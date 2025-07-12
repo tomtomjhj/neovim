@@ -1096,8 +1096,6 @@ function LanguageTree:_get_injections(range, thread_state)
     return {}
   end
 
-  local start = hrtime()
-
   ---@type table<string,Range6[][]>
   local result = {}
 
@@ -1132,11 +1130,6 @@ function LanguageTree:_get_injections(range, thread_state)
         else
           self:_log('match from injection query failed for pattern', pattern)
         end
-
-        -- Check the current function duration against the timeout, if it exists.
-        local current_time = hrtime()
-        self:_subtract_time(thread_state, current_time - start)
-        start = hrtime()
       end
     end
   end
