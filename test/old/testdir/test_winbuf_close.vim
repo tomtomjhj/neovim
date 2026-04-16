@@ -159,6 +159,33 @@ func Test_winfixwidth_on_close()
   setlocal nowinfixwidth splitbelow& splitright&
 endfunction
 
+" Test that closing a split doesn't leave an impossible layout when equalizing
+" with large 'winwidth' and adjacent 'winfixwidth' windows.
+func Test_winfixwidth_on_close_with_large_winwidth()
+  set equalalways winheight=99999 winwidth=99999
+
+  topleft vnew
+  leftabove vsplit
+  wincmd l
+  setlocal winfixwidth
+  wincmd l
+  setlocal winfixwidth
+  wincmd h
+  wincmd h
+
+  close
+  redraw
+
+  let info = getwininfo()
+  call sort(info, {a, b -> a.wincol - b.wincol})
+  call assert_equal(2, len(info))
+  call assert_equal([1, &columns - 2], [info[0].wincol, info[0].width])
+  call assert_equal([&columns, 1], [info[1].wincol, info[1].width])
+
+  %bwipeout!
+  set equalalways& winheight& winwidth&
+endfunc
+
 " Test that 'winfixheight' will be respected even there is non-leaf frame
 func Test_winfixheight_non_leaf_frame()
   vsplit
@@ -228,4 +255,3 @@ func Test_window_close_splitright_noequalalways()
   call assert_equal(h, winheight(0), "Window height does not match eight before opening and closing another window")
   call assert_equal(w, win_getid(), "Did not return to original window after opening and closing a window")
 endfunc
-

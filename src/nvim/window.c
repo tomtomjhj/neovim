@@ -2288,6 +2288,23 @@ static void win_equal_rec(win_T *next_curwin, bool current, frame_T *topfr, int 
       if (room < 0) {
         next_curwin_size = (int)p_wiw + room;
         room = 0;
+
+        frame_T *fr;
+        FOR_ALL_FRAMES(fr, topfr->fr_child) {
+          if (!frame_fixed_width(fr)) {
+            continue;
+          }
+
+          int min_size = frame_minwidth(fr, NOWIN);
+          int new_size = min_size;
+          if (frame_has_win(fr, next_curwin)) {
+            int next_min = (int)p_wiw - (frame_minwidth(fr, next_curwin) - min_size);
+            new_size += MAX(next_curwin_size - next_min, 0);
+          } else {
+            totwincount -= (min_size + (fr->fr_next == NULL ? extra_sep : 0)) / ((int)p_wmw + 1);
+          }
+          fr->fr_newwidth = new_size;
+        }
       } else {
         next_curwin_size = -1;
         frame_T *fr;
@@ -2414,6 +2431,23 @@ static void win_equal_rec(win_T *next_curwin, bool current, frame_T *topfr, int 
         // current window.
         next_curwin_size = (int)p_wh + room;
         room = 0;
+
+        frame_T *fr;
+        FOR_ALL_FRAMES(fr, topfr->fr_child) {
+          if (!frame_fixed_height(fr)) {
+            continue;
+          }
+
+          int min_size = frame_minheight(fr, NOWIN);
+          int new_size = min_size;
+          if (frame_has_win(fr, next_curwin)) {
+            int next_min = (int)p_wh - (frame_minheight(fr, next_curwin) - min_size);
+            new_size += MAX(next_curwin_size - next_min, 0);
+          } else {
+            totwincount -= get_maximum_wincount(fr, (min_size + (fr->fr_next == NULL ? extra_sep : 0)));
+          }
+          fr->fr_newheight = new_size;
+        }
       } else {
         next_curwin_size = -1;
         frame_T *fr;
