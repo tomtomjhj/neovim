@@ -139,43 +139,45 @@ describe('Scrollbind', function()
       vim.wo.scrollbind = true
     end)
 
+    local line1_grid = [[
+      ^1                   │1                  |
+      2                   │2                  |
+      3                   │3                  |
+      4 v                 │                   |
+      5 v                 │                   |
+      6 v                 │                   |
+      7 v                 │                   |
+      8                   │4                  |
+      9                   │5                  |
+      10                  │6                  |
+      {3:[Scratch]            }{2:[Scratch]          }|
+                                              |
+    ]]
+
+    screen:expect({ grid = line1_grid })
+
     n.feed('<C-d>')
 
     t.eq(5, n.api.nvim_get_option_value('scroll', {}))
 
     screen:expect({
       grid = [[
-        6 v                 │6                  |
-        7 v                 │7                  |
-        8                   │8                  |
-        9                   │9                  |
-        ^10                  │10                 |
-        11                  │11                 |
-        12                  │12                 |
-        13                  │13                 |
-        14                  │14                 |
-        15                  │15                 |
+        6 v                 │                   |
+        7 v                 │                   |
+        8                   │4                  |
+        9                   │5                  |
+        ^10                  │6                  |
+        11                  │7                  |
+        12                  │8                  |
+        13                  │9                  |
+        14                  │10                 |
+        15                  │11                 |
         {3:[Scratch]            }{2:[Scratch]          }|
                                                 |
       ]],
     })
 
     n.feed('<C-u>')
-
-    local line1_grid = [[
-      ^1                   │1                  |
-      2                   │2                  |
-      3                   │3                  |
-      4 v                 │4                  |
-      5 v                 │5                  |
-      6 v                 │6                  |
-      7 v                 │7                  |
-      8                   │8                  |
-      9                   │9                  |
-      10                  │10                 |
-      {3:[Scratch]            }{2:[Scratch]          }|
-                                              |
-    ]]
 
     screen:expect({ grid = line1_grid })
 
@@ -185,16 +187,16 @@ describe('Scrollbind', function()
 
     screen:expect({
       grid = [[
-        7 v                 │7                  |
-        8                   │8                  |
-        9                   │9                  |
-        10                  │10                 |
-        ^11                  │11                 |
-        12                  │12                 |
-        13                  │13                 |
-        14                  │14                 |
-        15                  │15                 |
-        16                  │16                 |
+        7 v                 │                   |
+        8                   │4                  |
+        9                   │5                  |
+        10                  │6                  |
+        ^11                  │7                  |
+        12                  │8                  |
+        13                  │9                  |
+        14                  │10                 |
+        15                  │11                 |
+        16                  │12                 |
         {3:[Scratch]            }{2:[Scratch]          }|
                                                 |
       ]],
@@ -212,16 +214,16 @@ describe('Scrollbind', function()
 
     screen:expect({
       grid = [[
-        5 v                 │5                  |
-        6 v                 │6                  |
-        7 v                 │7                  |
-        ^8                   │8                  |
-        9                   │9                  |
-        10                  │10                 |
-        11                  │11                 |
-        12                  │12                 |
-        13                  │13                 |
-        14                  │14                 |
+        5 v                 │                   |
+        6 v                 │                   |
+        7 v                 │                   |
+        ^8                   │4                  |
+        9                   │5                  |
+        10                  │6                  |
+        11                  │7                  |
+        12                  │8                  |
+        13                  │9                  |
+        14                  │10                 |
         {3:[Scratch]            }{2:[Scratch]          }|
                                                 |
       ]],
@@ -231,16 +233,16 @@ describe('Scrollbind', function()
 
     screen:expect({
       grid = [[
-        6 v                 │6                  |
-        7 v                 │7                  |
-        ^8                   │8                  |
-        9                   │9                  |
-        10                  │10                 |
-        11                  │11                 |
-        12                  │12                 |
-        13                  │13                 |
-        14                  │14                 |
-        15                  │15                 |
+        6 v                 │                   |
+        7 v                 │                   |
+        ^8                   │4                  |
+        9                   │5                  |
+        10                  │6                  |
+        11                  │7                  |
+        12                  │8                  |
+        13                  │9                  |
+        14                  │10                 |
+        15                  │11                 |
         {3:[Scratch]            }{2:[Scratch]          }|
                                                 |
       ]],
@@ -251,20 +253,177 @@ describe('Scrollbind', function()
 
     screen:expect({
       grid = [[
-        4 v                 │4                  |
-        5 v                 │5                  |
-        6 v                 │6                  |
-        7 v                 │7                  |
-        ^8                   │8                  |
-        9                   │9                  |
-        10                  │10                 |
-        11                  │11                 |
-        12                  │12                 |
-        13                  │13                 |
+        4 v                 │                   |
+        5 v                 │                   |
+        6 v                 │                   |
+        7 v                 │                   |
+        ^8                   │4                  |
+        9                   │5                  |
+        10                  │6                  |
+        11                  │7                  |
+        12                  │8                  |
+        13                  │9                  |
         {3:[Scratch]            }{2:[Scratch]          }|
                                                 |
       ]],
     })
+  end)
+
+  it('works with virtual lines on both sides of the same line', function()
+    n.exec_lua(function()
+      local lines = {} --- @type string[]
+
+      for i = 1, 20 do
+        lines[i] = tostring(i)
+      end
+
+      vim.o.laststatus = 0
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+      vim.bo.buftype = 'nofile'
+
+      local right_ns = vim.api.nvim_create_namespace('right')
+      vim.api.nvim_buf_set_extmark(0, right_ns, 2, 0, {
+        virt_lines = {
+          { { 'R4 v' } },
+          { { 'R5 v' } },
+        },
+      })
+
+      vim.wo.scrollbind = true
+      vim.cmd.vnew()
+
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+      vim.bo.buftype = 'nofile'
+
+      local left_ns = vim.api.nvim_create_namespace('left')
+      vim.api.nvim_buf_set_extmark(0, left_ns, 2, 0, {
+        virt_lines = {
+          { { 'L4 v' } },
+          { { 'L5 v' } },
+          { { 'L6 v' } },
+        },
+      })
+
+      vim.wo.scrollbind = true
+    end)
+
+    screen:expect([[
+      ^1                   │1                  |
+      2                   │2                  |
+      3                   │3                  |
+      L4 v                │R4 v               |
+      L5 v                │R5 v               |
+      L6 v                │                   |
+      4                   │4                  |
+      5                   │5                  |
+      6                   │6                  |
+      7                   │7                  |
+      8                   │8                  |
+                                              |
+    ]])
+  end)
+
+  it('works with virtual lines above and below the same boundary', function()
+    n.exec_lua(function()
+      local lines = {} --- @type string[]
+
+      for i = 1, 20 do
+        lines[i] = tostring(i)
+      end
+
+      vim.o.laststatus = 0
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+      vim.bo.buftype = 'nofile'
+
+      local right_ns = vim.api.nvim_create_namespace('right')
+      vim.api.nvim_buf_set_extmark(0, right_ns, 2, 0, {
+        virt_lines = { { { 'R4b' } } },
+      })
+      vim.api.nvim_buf_set_extmark(0, right_ns, 3, 0, {
+        virt_lines_above = true,
+        virt_lines = { { { 'R4a' } } },
+      })
+
+      vim.wo.scrollbind = true
+      vim.cmd.vnew()
+
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+      vim.bo.buftype = 'nofile'
+
+      local left_ns = vim.api.nvim_create_namespace('left')
+      vim.api.nvim_buf_set_extmark(0, left_ns, 2, 0, {
+        virt_lines = {
+          { { 'L4b1' } },
+          { { 'L4b2' } },
+        },
+      })
+      vim.api.nvim_buf_set_extmark(0, left_ns, 3, 0, {
+        virt_lines_above = true,
+        virt_lines = { { { 'L4a' } } },
+      })
+
+      vim.wo.scrollbind = true
+    end)
+
+    screen:expect([[
+      ^1                   │1                  |
+      2                   │2                  |
+      3                   │3                  |
+      L4b1                │R4b                |
+      L4b2                │R4a                |
+      L4a                 │                   |
+      4                   │4                  |
+      5                   │5                  |
+      6                   │6                  |
+      7                   │7                  |
+      8                   │8                  |
+                                              |
+    ]])
+  end)
+
+  it('does not borrow virtual filler without vertical scrollbind', function()
+    n.exec_lua(function()
+      local lines = {} --- @type string[]
+
+      for i = 1, 20 do
+        lines[i] = tostring(i)
+      end
+
+      vim.o.laststatus = 0
+      vim.o.scrollopt = 'hor'
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+      vim.bo.buftype = 'nofile'
+      vim.wo.scrollbind = true
+
+      vim.cmd.vnew()
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+      vim.bo.buftype = 'nofile'
+
+      local ns = vim.api.nvim_create_namespace('test')
+      vim.api.nvim_buf_set_extmark(0, ns, 2, 0, {
+        virt_lines = {
+          { { '4 v' } },
+          { { '5 v' } },
+        },
+      })
+
+      vim.wo.scrollbind = true
+    end)
+
+    screen:expect([[
+      ^1                   │1                  |
+      2                   │2                  |
+      3                   │3                  |
+      4 v                 │4                  |
+      5 v                 │5                  |
+      4                   │6                  |
+      5                   │7                  |
+      6                   │8                  |
+      7                   │9                  |
+      8                   │10                 |
+      9                   │11                 |
+                                              |
+    ]])
   end)
 
   it('works with buffers of different lengths', function()
@@ -358,16 +517,16 @@ describe('Scrollbind', function()
     n.feed('<C-e>')
     screen:expect({
       grid = [[
-        ^3                   │3 v                |
-        4                   │4 v                |
-        5                   │5                  |
-        6                   │6                  |
+                            │3 v                |
+                            │4 v                |
+        ^2                   │5                  |
+        3                   │6                  |
+        4                   │{1:~                  }|
+        5                   │{1:~                  }|
+        6                   │{1:~                  }|
         7                   │{1:~                  }|
         8                   │{1:~                  }|
         9                   │{1:~                  }|
-        10                  │{1:~                  }|
-        11                  │{1:~                  }|
-        12                  │{1:~                  }|
         {3:[Scratch]            }{2:[Scratch]          }|
                                                 |
       ]],
@@ -377,16 +536,16 @@ describe('Scrollbind', function()
 
     screen:expect({
       grid = [[
-        ^11                  │6                  |
+        ^8                   │6                  |
+        9                   │{1:~                  }|
+        10                  │{1:~                  }|
+        11                  │{1:~                  }|
         12                  │{1:~                  }|
         13                  │{1:~                  }|
         14                  │{1:~                  }|
         15                  │{1:~                  }|
         16                  │{1:~                  }|
         17                  │{1:~                  }|
-        18                  │{1:~                  }|
-        19                  │{1:~                  }|
-        20                  │{1:~                  }|
         {3:[Scratch]            }{2:[Scratch]          }|
                                                 |
       ]],
@@ -398,21 +557,21 @@ describe('Scrollbind', function()
     n.feed('<C-y>')
     n.feed('<C-y>')
 
-    t.eq(n.exec_lua [[return vim.fn.line('w0', 1001)]], 6)
-    t.eq(n.exec_lua [[return vim.fn.line('w0', 1000)]], 3)
+    t.eq(3, n.exec_lua [[return vim.fn.line('w0', 1001)]])
+    t.eq(3, n.exec_lua [[return vim.fn.line('w0', 1000)]])
 
     screen:expect({
       grid = [[
-        6                   │6                  |
+        3                   │6                  |
+        4                   │{1:~                  }|
+        5                   │{1:~                  }|
+        6                   │{1:~                  }|
         7                   │{1:~                  }|
-        8                   │{1:~                  }|
+        ^8                   │{1:~                  }|
         9                   │{1:~                  }|
         10                  │{1:~                  }|
-        ^11                  │{1:~                  }|
+        11                  │{1:~                  }|
         12                  │{1:~                  }|
-        13                  │{1:~                  }|
-        14                  │{1:~                  }|
-        15                  │{1:~                  }|
         {3:[Scratch]            }{2:[Scratch]          }|
                                                 |
       ]],
@@ -424,16 +583,16 @@ describe('Scrollbind', function()
 
     screen:expect({
       grid = [[
-        3                   │3 v                |
-        4                   │4 v                |
-        5                   │5                  |
-        6                   │6                  |
+                            │3 v                |
+                            │4 v                |
+        2                   │5                  |
+        3                   │6                  |
+        4                   │{1:~                  }|
+        5                   │{1:~                  }|
+        6                   │{1:~                  }|
         7                   │{1:~                  }|
-        8                   │{1:~                  }|
+        ^8                   │{1:~                  }|
         9                   │{1:~                  }|
-        10                  │{1:~                  }|
-        ^11                  │{1:~                  }|
-        12                  │{1:~                  }|
         {3:[Scratch]            }{2:[Scratch]          }|
                                                 |
       ]],

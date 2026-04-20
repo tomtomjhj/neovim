@@ -63,10 +63,10 @@
 #define MB_FILLER_CHAR '<'  // character used when a double-width character doesn't fit.
 
 typedef struct {
-  int filler_lines;          ///< nr of filler lines to be drawn
-  int virt_lines;            ///< nr of visible virtual lines
-  int total_virt_rows;       ///< nr of virtual lines before topline clipping
-  int virt_below;            ///< nr of virtual lines belonging to previous line
+  int virt_fill;             ///< virtual filler rows visible above the buffer line
+  int virt_line_start;       ///< first visible local virtual row
+  int virt_line_count;       ///< local virtual rows visible in virtual filler rows
+  int virt_below_count;      ///< visible local virtual rows belonging to previous line
   int virt_below_skip;       ///< nr of below filler skipped to satisfy w_topfill
   int filler_lines_skip;     ///< nr of filler lines skipped to satisfy w_topfill
 } VirtFillInfo;
@@ -116,8 +116,10 @@ typedef struct {
 
   hlf_T diff_hlf;            ///< type of diff highlighting
 
-  int n_virt_lines;          ///< nr of virtual lines
-  int n_virt_below;          ///< nr of virtual lines belonging to previous line
+  int n_virt_lines;          ///< nr of local virtual rows visible in virtual filler rows
+  int n_virt_fill;           ///< nr of virtual filler rows, including scrollbind blanks
+  int n_virt_below;          ///< nr of visible virtual rows belonging to previous line
+  int virt_line_start;       ///< first visible local virtual row
   int filler_lines;          ///< nr of filler lines to be drawn
   int filler_todo;           ///< nr of filler lines still to do + 1
   int virt_below_skip;       ///< nr of below filler skipped to satisfy w_topfill
@@ -642,6 +644,18 @@ static bool use_cursor_line_nr(win_T *wp, winlinevars_T *wlv)
                  && (wp->w_p_culopt_flags & kOptCuloptFlagLine)));
 }
 
+static int virt_filler_row(const winlinevars_T *wlv)
+{
+  int virt_rows_todo = wlv->filler_todo - (wlv->filler_lines - wlv->n_virt_fill);
+  return virt_rows_todo > 0 ? wlv->n_virt_fill - virt_rows_todo : -1;
+}
+
+static bool virt_filler_belongs_to_previous_line(const winlinevars_T *wlv)
+{
+  int virt_row = virt_filler_row(wlv);
+  return virt_row >= 0 && virt_row < wlv->n_virt_below;
+}
+
 /// Return line number attribute, combining the appropriate LineNr* highlight
 /// with the highest priority sign numhl highlight, if any.
 static int get_line_number_attr(win_T *wp, winlinevars_T *wlv)
@@ -649,7 +663,7 @@ static int get_line_number_attr(win_T *wp, winlinevars_T *wlv)
   int numhl_attr = wlv->sign_num_attr;
 
   // Get previous sign numhl for virt_lines belonging to the previous line.
-  if ((wlv->n_virt_lines - wlv->filler_todo) < wlv->n_virt_below) {
+  if (virt_filler_belongs_to_previous_line(wlv)) {
     if (wlv->prev_num_attr == -1) {
       decor_redraw_signs(wp, wp->w_buffer, wlv->lnum - 2, NULL, NULL, NULL, &wlv->prev_num_attr);
       if (wlv->prev_num_attr > 0) {
@@ -729,7 +743,7 @@ static void draw_statuscol(win_T *wp, winlinevars_T *wlv, int col_rows, statusco
   static disptick_T prev_tick = 0;
 
   // Adjust lnum for filler lines belonging to the line above.
-  linenr_T lnum = wlv->lnum - ((wlv->n_virt_lines - wlv->filler_todo) < wlv->n_virt_below);
+  linenr_T lnum = wlv->lnum - virt_filler_belongs_to_previous_line(wlv);
 
   // Cache v:virtnum for virtual lines and reset/decrement it accordingly. Only when
   // lnum < wp->w_topline do we need to check for virt_below on the previous line.
@@ -880,7 +894,7 @@ static void handle_breakindent(win_T *wp, winlinevars_T *wlv, int gap_decor_attr
 static void handle_showbreak_and_filler(win_T *wp, winlinevars_T *wlv, int gap_decor_attr)
 {
   int remaining = wp->w_view_width - wlv->off;
-  if (wlv->filler_todo > wlv->filler_lines - wlv->n_virt_lines) {
+  if (wlv->filler_todo > wlv->filler_lines - wlv->n_virt_fill) {
     // TODO(bfredl): check this doesn't inhibit TUI-style
     //               clear-to-end-of-line.
     draw_col_fill(wlv, schar_from_ascii(' '), remaining, 0);
@@ -921,26 +935,31 @@ static void handle_showbreak_and_filler(win_T *wp, winlinevars_T *wlv, int gap_d
 static VirtFillInfo win_virt_fill_info(win_T *wp, linenr_T lnum, int diff_fill,
                                        VirtLines *virt_lines)
 {
-  int virt_below = 0;
-  int virt_count = decor_virt_lines(wp, lnum - 1, lnum, &virt_below, virt_lines, true);
-  int total_virt_rows = virt_count;
-  int filler_lines = diff_fill + virt_count;
+  int local_virt_below = 0;
+  int local_virt_rows = decor_virt_lines(wp, lnum - 1, lnum, &local_virt_below,
+                                         virt_lines, true);
+  int shared_virt_fill = MAX(win_get_fill(wp, lnum) - diff_fill, 0);
+  int visible_virt_fill = shared_virt_fill;
+  int skipped_virt_fill = 0;
   int virt_below_skip = 0;
   int filler_lines_skip = 0;
 
   if (lnum == wp->w_topline) {
-    virt_below_skip = MIN(virt_below, virt_count - wp->w_topfill);
-    virt_below -= virt_below_skip;
-    filler_lines_skip = filler_lines - virt_below_skip - wp->w_topfill;
-    filler_lines = wp->w_topfill;
-    virt_count = MIN(virt_count, filler_lines);
+    int visible_diff_fill = MIN(wp->w_topfill, diff_check_fill(wp, lnum));
+    visible_virt_fill = MAX(wp->w_topfill - visible_diff_fill, 0);
+    skipped_virt_fill = MAX(shared_virt_fill - visible_virt_fill, 0);
+    virt_below_skip = MIN(local_virt_below, skipped_virt_fill);
+    filler_lines_skip = MAX(diff_fill + shared_virt_fill - wp->w_topfill, 0) - virt_below_skip;
   }
 
+  int local_start = MIN(skipped_virt_fill, local_virt_rows);
+  int local_visible = MAX(MIN(local_virt_rows - local_start, visible_virt_fill), 0);
+
   return (VirtFillInfo){
-    .filler_lines = filler_lines,
-    .virt_lines = virt_count,
-    .total_virt_rows = total_virt_rows,
-    .virt_below = virt_below,
+    .virt_fill = visible_virt_fill,
+    .virt_line_start = local_start,
+    .virt_line_count = local_visible,
+    .virt_below_count = MIN(MAX(local_virt_below - local_start, 0), local_visible),
     .virt_below_skip = virt_below_skip,
     .filler_lines_skip = filler_lines_skip,
   };
@@ -1420,11 +1439,15 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, int col_rows, b
   }
   VirtLines virt_lines = KV_INITIAL_VALUE;
   VirtFillInfo virt_fill = win_virt_fill_info(wp, lnum, wlv.filler_lines, &virt_lines);
-  wlv.filler_lines = virt_fill.filler_lines;
-  wlv.n_virt_lines = virt_fill.virt_lines;
-  // Preserving count of virt_lines for topline visibility
-  int total_virt_rows = virt_fill.total_virt_rows;
-  wlv.n_virt_below = virt_fill.virt_below;
+  if (lnum == wp->w_topline) {
+    wlv.filler_lines = wp->w_topfill;
+  } else {
+    wlv.filler_lines += virt_fill.virt_fill;
+  }
+  wlv.n_virt_fill = virt_fill.virt_fill;
+  wlv.virt_line_start = virt_fill.virt_line_start;
+  wlv.n_virt_lines = virt_fill.virt_line_count;
+  wlv.n_virt_below = virt_fill.virt_below_count;
   wlv.virt_below_skip = virt_fill.virt_below_skip;
   wlv.filler_lines_skip = virt_fill.filler_lines_skip;
   wlv.filler_todo = wlv.filler_lines;
@@ -1813,10 +1836,10 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, int col_rows, b
       assert(wlv.off == 0);
 
       if (wlv.filler_todo > 0) {
-        // nvim_buf_set_extmark: virt_lines_overflow
-        int virt_rows_todo = wlv.filler_todo - (wlv.filler_lines - wlv.n_virt_lines);
-        if (virt_rows_todo > 0) {
-          int target_row = total_virt_rows - virt_rows_todo;
+        int virt_rows_todo = wlv.filler_todo - (wlv.filler_lines - wlv.n_virt_fill);
+        int local_virt_row = wlv.n_virt_fill - virt_rows_todo;
+        if (local_virt_row >= 0 && local_virt_row < wlv.n_virt_lines) {
+          int target_row = wlv.virt_line_start + local_virt_row;
           // Count number of rows spanned by virtual line.
           // Find the virtual line containing the target row.
           // Set skip cells with the same row-counting function so offset calculation stays in sync

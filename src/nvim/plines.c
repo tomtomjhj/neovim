@@ -769,11 +769,59 @@ void getvcols(win_T *wp, pos_T *pos1, pos_T *pos2, colnr_T *left, colnr_T *right
 /// Functions calculating vertical size of text when displayed inside a window.
 /// Calls horizontal size functions defined above.
 
+static bool win_scrollbind_with_virt_fill(win_T *wp)
+{
+  return wp->w_p_scb && (wp->w_p_diff || vim_strchr(p_sbo, 'v'));
+}
+
+static bool win_has_scrollbind_virt_fill_peer(win_T *wp)
+{
+  if (!win_scrollbind_with_virt_fill(wp)) {
+    return false;
+  }
+
+  FOR_ALL_WINDOWS_IN_TAB(other, curtab) {
+    if (other != wp && win_scrollbind_with_virt_fill(other)
+        && buf_meta_total(other->w_buffer, kMTMetaLines)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+static int win_get_fill_virt(win_T *wp, linenr_T lnum, bool apply_folds, bool include_peers)
+{
+  int virt_lines = decor_virt_lines(wp, lnum - 1, lnum, NULL, NULL, apply_folds);
+
+  if (!include_peers) {
+    return virt_lines;
+  }
+
+  // Scrollbind aligns windows by screen rows, so filler above a buffer line
+  // must reserve enough rows for the largest virt_lines block any bound peer
+  // displays at that position.
+  FOR_ALL_WINDOWS_IN_TAB(other, curtab) {
+    if (other == wp || !win_scrollbind_with_virt_fill(other)
+        || !buf_meta_total(other->w_buffer, kMTMetaLines)) {
+      continue;
+    }
+
+    virt_lines = MAX(virt_lines,
+                     decor_virt_lines(other, lnum - 1, lnum, NULL, NULL, apply_folds));
+  }
+
+  return virt_lines;
+}
+
 /// Check if there may be filler lines anywhere in window "wp".
 bool win_may_fill(win_T *wp)
 {
-  return ((wp->w_p_diff && diffopt_filler())
-          || buf_meta_total(wp->w_buffer, kMTMetaLines));
+  if ((wp->w_p_diff && diffopt_filler()) || buf_meta_total(wp->w_buffer, kMTMetaLines)) {
+    return true;
+  }
+
+  return win_has_scrollbind_virt_fill_peer(wp);
 }
 
 /// Return the number of filler lines above "lnum".
@@ -784,7 +832,17 @@ bool win_may_fill(win_T *wp)
 /// @return Number of filler lines above lnum
 int win_get_fill(win_T *wp, linenr_T lnum)
 {
-  return decor_virt_lines(wp, lnum - 1, lnum, NULL, NULL, true) + diff_check_fill(wp, lnum);
+  int virt_lines = win_get_fill_virt(wp, lnum, true, win_has_scrollbind_virt_fill_peer(wp));
+
+  // be quick when there are no filler lines
+  if (diffopt_filler()) {
+    int n = diff_check_fill(wp, lnum);
+
+    if (n > 0) {
+      return virt_lines + n;
+    }
+  }
+  return virt_lines;
 }
 
 /// Return the number of window lines occupied by buffer line "lnum".
@@ -985,7 +1043,16 @@ int plines_m_win(win_T *wp, linenr_T first, linenr_T last, int max)
 /// Mainly used for calculating scrolling offsets.
 int plines_m_win_fill(win_T *wp, linenr_T first, linenr_T last)
 {
-  int count = last - first + 1 + decor_virt_lines(wp, first - 1, last, NULL, NULL, false);
+  int count = last - first + 1;
+
+  bool include_peers = win_has_scrollbind_virt_fill_peer(wp);
+  if (include_peers) {
+    for (int lnum = first; lnum <= last; lnum++) {
+      count += win_get_fill_virt(wp, lnum, false, true);
+    }
+  } else {
+    count += decor_virt_lines(wp, first - 1, last, NULL, NULL, false);
+  }
 
   if (diffopt_filler()) {
     for (int lnum = first; lnum <= last; lnum++) {
