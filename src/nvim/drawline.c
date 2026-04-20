@@ -62,6 +62,15 @@
 
 #define MB_FILLER_CHAR '<'  // character used when a double-width character doesn't fit.
 
+typedef struct {
+  int filler_lines;          ///< nr of filler lines to be drawn
+  int virt_lines;            ///< nr of visible virtual lines
+  int total_virt_rows;       ///< nr of virtual lines before topline clipping
+  int virt_below;            ///< nr of virtual lines belonging to previous line
+  int virt_below_skip;       ///< nr of below filler skipped to satisfy w_topfill
+  int filler_lines_skip;     ///< nr of filler lines skipped to satisfy w_topfill
+} VirtFillInfo;
+
 /// structure with variables passed between win_line() and other functions
 typedef struct {
   const linenr_T lnum;       ///< line number to be drawn
@@ -909,6 +918,34 @@ static void handle_showbreak_and_filler(win_T *wp, winlinevars_T *wlv, int gap_d
   }
 }
 
+static VirtFillInfo win_virt_fill_info(win_T *wp, linenr_T lnum, int diff_fill,
+                                       VirtLines *virt_lines)
+{
+  int virt_below = 0;
+  int virt_count = decor_virt_lines(wp, lnum - 1, lnum, &virt_below, virt_lines, true);
+  int total_virt_rows = virt_count;
+  int filler_lines = diff_fill + virt_count;
+  int virt_below_skip = 0;
+  int filler_lines_skip = 0;
+
+  if (lnum == wp->w_topline) {
+    virt_below_skip = MIN(virt_below, virt_count - wp->w_topfill);
+    virt_below -= virt_below_skip;
+    filler_lines_skip = filler_lines - virt_below_skip - wp->w_topfill;
+    filler_lines = wp->w_topfill;
+    virt_count = MIN(virt_count, filler_lines);
+  }
+
+  return (VirtFillInfo){
+    .filler_lines = filler_lines,
+    .virt_lines = virt_count,
+    .total_virt_rows = total_virt_rows,
+    .virt_below = virt_below,
+    .virt_below_skip = virt_below_skip,
+    .filler_lines_skip = filler_lines_skip,
+  };
+}
+
 static void apply_cursorline_highlight(win_T *wp, winlinevars_T *wlv)
 {
   wlv->cul_attr = win_hl_attr(wp, HLF_CUL);
@@ -1382,17 +1419,14 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, int col_rows, b
     area_highlighting = true;
   }
   VirtLines virt_lines = KV_INITIAL_VALUE;
-  wlv.n_virt_lines = decor_virt_lines(wp, lnum - 1, lnum, &wlv.n_virt_below, &virt_lines, true);
+  VirtFillInfo virt_fill = win_virt_fill_info(wp, lnum, wlv.filler_lines, &virt_lines);
+  wlv.filler_lines = virt_fill.filler_lines;
+  wlv.n_virt_lines = virt_fill.virt_lines;
   // Preserving count of virt_lines for topline visibility
-  int total_virt_rows = wlv.n_virt_lines;
-  wlv.filler_lines += wlv.n_virt_lines;
-  if (lnum == wp->w_topline) {
-    wlv.virt_below_skip = MIN(wlv.n_virt_below, wlv.n_virt_lines - wp->w_topfill);
-    wlv.n_virt_below -= wlv.virt_below_skip;
-    wlv.filler_lines_skip = wlv.filler_lines - wlv.virt_below_skip - wp->w_topfill;
-    wlv.filler_lines = wp->w_topfill;
-    wlv.n_virt_lines = MIN(wlv.n_virt_lines, wlv.filler_lines);
-  }
+  int total_virt_rows = virt_fill.total_virt_rows;
+  wlv.n_virt_below = virt_fill.virt_below;
+  wlv.virt_below_skip = virt_fill.virt_below_skip;
+  wlv.filler_lines_skip = virt_fill.filler_lines_skip;
   wlv.filler_todo = wlv.filler_lines;
 
   // Cursor line highlighting for 'cursorline' in the current window.
