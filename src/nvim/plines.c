@@ -3,6 +3,7 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "nvim/api/extmark.h"
@@ -30,6 +31,14 @@
 #include "nvim/state.h"
 #include "nvim/state_defs.h"
 #include "nvim/types_defs.h"
+
+typedef struct {
+  int draw_row;
+  int win_index;
+  int count;
+} VirtFillRangeCount;
+
+typedef kvec_t(VirtFillRangeCount) VirtFillRangeCounts;
 
 #include "plines.c.generated.h"
 
@@ -87,6 +96,7 @@ int linetabsize_eol(win_T *wp, linenr_T lnum)
 }
 
 static const uint32_t inline_filter[kMTMetaCount] = {[kMTMetaInline] = kMTFilterSelect };
+static const uint32_t lines_filter[kMTMetaCount] = {[kMTMetaLines] = kMTFilterSelect };
 
 /// Prepare the structure passed to charsize functions.
 ///
@@ -790,6 +800,101 @@ static bool win_has_scrollbind_virt_fill_peer(win_T *wp)
   return false;
 }
 
+static int virt_fill_range_count_cmp(const void *a, const void *b)
+{
+  const VirtFillRangeCount *ca = a;
+  const VirtFillRangeCount *cb = b;
+
+  if (ca->draw_row != cb->draw_row) {
+    return ca->draw_row < cb->draw_row ? -1 : 1;
+  }
+
+  if (ca->win_index != cb->win_index) {
+    return ca->win_index < cb->win_index ? -1 : 1;
+  }
+
+  return 0;
+}
+
+static void collect_virt_fill_range(win_T *wp, int win_index, int start_row, int end_row,
+                                    bool apply_folds, VirtFillRangeCounts *counts)
+{
+  // MarkTree traversal logic taken from decor_virt_lines.
+
+  buf_T *buf = wp->w_buffer;
+  if (!buf_meta_total(buf, kMTMetaLines)) {
+    return;
+  }
+
+  MarkTreeIter itr[1] = { 0 };
+  if (!marktree_itr_get_filter(buf->b_marktree, MAX(start_row - 1, 0), 0, end_row, 0,
+                               lines_filter, itr)) {
+    return;
+  }
+
+  assert(start_row >= 0);
+
+  while (true) {
+    MTKey mark = marktree_itr_current(itr);
+    DecorVirtText *vt = mt_decor_virt(mark);
+    if (!mt_invalid(mark) && ns_in_win(mark.ns, wp)) {
+      while (vt) {
+        if (vt->flags & kVTIsLines) {
+          bool above = vt->flags & kVTLinesAbove;
+          int mrow = mark.pos.row;
+          int draw_row = mrow + (above ? 0 : 1);
+          if (draw_row >= start_row && draw_row < end_row
+              && (!apply_folds || !(hasFolding(wp, mrow + 1, NULL, NULL)
+                                    || decor_conceal_line(wp, mrow, false)))) {
+            kv_push(*counts, ((VirtFillRangeCount){
+              .draw_row = draw_row,
+              .win_index = win_index,
+              .count = (int)kv_size(vt->data.virt_lines),
+            }));
+          }
+        }
+        vt = vt->next;
+      }
+    }
+
+    if (!marktree_itr_next_filter(buf->b_marktree, itr, end_row, 0, lines_filter)) {
+      break;
+    }
+  }
+}
+
+static int sum_virt_fill_range_counts(VirtFillRangeCounts *counts)
+{
+  if (kv_size(*counts) == 0) {
+    return 0;
+  }
+
+  qsort((void *)&kv_A(*counts, 0), kv_size(*counts), sizeof(kv_A(*counts, 0)),
+        virt_fill_range_count_cmp);
+
+  int total = 0;
+  size_t i = 0;
+  while (i < kv_size(*counts)) {
+    int draw_row = kv_A(*counts, i).draw_row;
+    int row_max = 0;
+
+    while (i < kv_size(*counts) && kv_A(*counts, i).draw_row == draw_row) {
+      int win_index = kv_A(*counts, i).win_index;
+      int win_count = 0;
+      while (i < kv_size(*counts) && kv_A(*counts, i).draw_row == draw_row
+             && kv_A(*counts, i).win_index == win_index) {
+        win_count += kv_A(*counts, i).count;
+        i++;
+      }
+      row_max = MAX(row_max, win_count);
+    }
+
+    total += row_max;
+  }
+
+  return total;
+}
+
 static int win_get_fill_virt(win_T *wp, linenr_T lnum, bool apply_folds, bool include_peers)
 {
   int virt_lines = decor_virt_lines(wp, lnum - 1, lnum, NULL, NULL, apply_folds);
@@ -811,6 +916,34 @@ static int win_get_fill_virt(win_T *wp, linenr_T lnum, bool apply_folds, bool in
                      decor_virt_lines(other, lnum - 1, lnum, NULL, NULL, apply_folds));
   }
 
+  return virt_lines;
+}
+
+static int win_get_fill_virt_range(win_T *wp, linenr_T first, linenr_T last, bool apply_folds,
+                                   bool include_peers)
+{
+  int start_row = first - 1;
+  int end_row = last;
+
+  if (!include_peers) {
+    return decor_virt_lines(wp, start_row, end_row, NULL, NULL, apply_folds);
+  }
+
+  VirtFillRangeCounts counts = KV_INITIAL_VALUE;
+  int win_index = 0;
+  collect_virt_fill_range(wp, win_index++, start_row, end_row, apply_folds, &counts);
+
+  FOR_ALL_WINDOWS_IN_TAB(other, curtab) {
+    if (other == wp || !win_scrollbind_with_virt_fill(other)
+        || !buf_meta_total(other->w_buffer, kMTMetaLines)) {
+      continue;
+    }
+
+    collect_virt_fill_range(other, win_index++, start_row, end_row, apply_folds, &counts);
+  }
+
+  int virt_lines = sum_virt_fill_range_counts(&counts);
+  kv_destroy(counts);
   return virt_lines;
 }
 
@@ -1045,14 +1178,8 @@ int plines_m_win_fill(win_T *wp, linenr_T first, linenr_T last)
 {
   int count = last - first + 1;
 
-  bool include_peers = win_has_scrollbind_virt_fill_peer(wp);
-  if (include_peers) {
-    for (int lnum = first; lnum <= last; lnum++) {
-      count += win_get_fill_virt(wp, lnum, false, true);
-    }
-  } else {
-    count += decor_virt_lines(wp, first - 1, last, NULL, NULL, false);
-  }
+  count += win_get_fill_virt_range(wp, first, last, false,
+                                   win_has_scrollbind_virt_fill_peer(wp));
 
   if (diffopt_filler()) {
     for (int lnum = first; lnum <= last; lnum++) {
