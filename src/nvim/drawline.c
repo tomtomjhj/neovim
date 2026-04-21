@@ -117,7 +117,7 @@ typedef struct {
   hlf_T diff_hlf;            ///< type of diff highlighting
 
   int n_virt_lines;          ///< nr of local virtual rows visible in virtual filler rows
-  int n_virt_fill;           ///< nr of virtual filler rows, including scrollbind blanks
+  int n_virt_fill;           ///< nr of virtual/scrollbind blank filler rows
   int n_virt_below;          ///< nr of visible virtual rows belonging to previous line
   int virt_line_start;       ///< first visible local virtual row
   int filler_lines;          ///< nr of filler lines to be drawn
@@ -938,25 +938,25 @@ static VirtFillInfo win_virt_fill_info(win_T *wp, linenr_T lnum, int diff_fill,
   int local_virt_below = 0;
   int local_virt_rows = decor_virt_lines(wp, lnum - 1, lnum, &local_virt_below,
                                          virt_lines, true);
-  int shared_virt_fill = MAX(win_get_fill(wp, lnum) - diff_fill, 0);
-  int visible_virt_fill = shared_virt_fill;
-  int skipped_virt_fill = 0;
+  int total_blank_fill = MAX(win_get_fill(wp, lnum) - diff_fill, 0);
+  int visible_blank_fill = total_blank_fill;
+  int skipped_blank_fill = 0;
   int virt_below_skip = 0;
   int filler_lines_skip = 0;
 
   if (lnum == wp->w_topline) {
     int visible_diff_fill = MIN(wp->w_topfill, diff_check_fill(wp, lnum));
-    visible_virt_fill = MAX(wp->w_topfill - visible_diff_fill, 0);
-    skipped_virt_fill = MAX(shared_virt_fill - visible_virt_fill, 0);
-    virt_below_skip = MIN(local_virt_below, skipped_virt_fill);
-    filler_lines_skip = MAX(diff_fill + shared_virt_fill - wp->w_topfill, 0) - virt_below_skip;
+    visible_blank_fill = MAX(wp->w_topfill - visible_diff_fill, 0);
+    skipped_blank_fill = MAX(total_blank_fill - visible_blank_fill, 0);
+    virt_below_skip = MIN(local_virt_below, skipped_blank_fill);
+    filler_lines_skip = MAX(diff_fill + total_blank_fill - wp->w_topfill, 0) - virt_below_skip;
   }
 
-  int local_start = MIN(skipped_virt_fill, local_virt_rows);
-  int local_visible = MAX(MIN(local_virt_rows - local_start, visible_virt_fill), 0);
+  int local_start = MIN(skipped_blank_fill, local_virt_rows);
+  int local_visible = MAX(MIN(local_virt_rows - local_start, visible_blank_fill), 0);
 
   return (VirtFillInfo){
-    .virt_fill = visible_virt_fill,
+    .virt_fill = visible_blank_fill,
     .virt_line_start = local_start,
     .virt_line_count = local_visible,
     .virt_below_count = MIN(MAX(local_virt_below - local_start, 0), local_visible),

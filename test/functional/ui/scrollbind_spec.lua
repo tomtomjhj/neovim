@@ -426,6 +426,134 @@ describe('Scrollbind', function()
     ]])
   end)
 
+  it('shows placeholder filler in non-diff peers for diff filler', function()
+    screen:try_resize(60, 10)
+
+    n.exec_lua(function()
+      vim.o.laststatus = 0
+      vim.o.diffopt = 'internal,filler'
+      vim.o.scrollopt = 'hor'
+
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'A1', 'A2', 'A3', 'A4' })
+      vim.bo.buftype = 'nofile'
+      vim.wo.scrollbind = true
+      vim.cmd.diffthis()
+      _G.scrollbind_diff_win = vim.api.nvim_get_current_win()
+
+      vim.cmd.vnew()
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'A1', 'Bx', 'By', 'A2', 'A3', 'A4' })
+      vim.bo.buftype = 'nofile'
+      vim.wo.scrollbind = true
+      vim.cmd.diffthis()
+
+      vim.cmd.vnew()
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'C1', 'C2', 'C3', 'C4' })
+      vim.bo.buftype = 'nofile'
+      vim.wo.scrollbind = true
+      _G.scrollbind_normal_win = vim.api.nvim_get_current_win()
+    end)
+
+    screen:expect({
+      unchanged = true,
+      condition = function()
+        local rows = n.exec_lua(function()
+          local pos = vim.fn.win_screenpos(_G.scrollbind_normal_win)
+          local col = pos[2]
+          return {
+            vim.fn.screenstring(1, col),
+            vim.fn.screenstring(2, col),
+            vim.fn.screenstring(3, col),
+            vim.fn.screenstring(4, col),
+          }
+        end)
+
+        t.eq({ 'C', ' ', ' ', 'C' }, rows)
+      end,
+    })
+
+    n.exec_lua(function()
+      vim.api.nvim_set_current_win(_G.scrollbind_diff_win)
+    end)
+    n.feed('<C-e>')
+
+    screen:expect({
+      unchanged = true,
+      condition = function()
+        local rows = n.exec_lua(function()
+          local pos = vim.fn.win_screenpos(_G.scrollbind_normal_win)
+          local col = pos[2]
+          return {
+            vim.fn.screenstring(1, col),
+            vim.fn.screenstring(2, col),
+            vim.fn.screenstring(3, col),
+          }
+        end)
+
+        t.eq({ ' ', ' ', 'C' }, rows)
+      end,
+    })
+  end)
+
+  it('composes diff filler with virtual lines in scrollbound peers', function()
+    screen:try_resize(60, 10)
+
+    n.exec_lua(function()
+      vim.o.laststatus = 0
+      vim.o.diffopt = 'internal,filler'
+      vim.o.scrollopt = 'hor'
+
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'A1', 'A2', 'A3', 'A4' })
+      vim.bo.buftype = 'nofile'
+      vim.wo.scrollbind = true
+      vim.cmd.diffthis()
+      _G.scrollbind_mixed_diff_win = vim.api.nvim_get_current_win()
+
+      vim.cmd.vnew()
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'A1', 'Bx', 'By', 'A2', 'A3', 'A4' })
+      vim.bo.buftype = 'nofile'
+      vim.wo.scrollbind = true
+      vim.cmd.diffthis()
+
+      vim.cmd.vnew()
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'C1', 'C2', 'C3', 'C4' })
+      local ns = vim.api.nvim_create_namespace('test')
+      vim.api.nvim_buf_set_extmark(0, ns, 0, 0, {
+        virt_lines = {
+          { { 'V1' } },
+          { { 'V2' } },
+          { { 'V3' } },
+        },
+      })
+      vim.bo.buftype = 'nofile'
+      vim.wo.scrollbind = true
+      _G.scrollbind_mixed_normal_win = vim.api.nvim_get_current_win()
+    end)
+
+    screen:expect({
+      unchanged = true,
+      condition = function()
+        local rows = n.exec_lua(function()
+          local diff_pos = vim.fn.win_screenpos(_G.scrollbind_mixed_diff_win)
+          local normal_pos = vim.fn.win_screenpos(_G.scrollbind_mixed_normal_win)
+          local diff_col = diff_pos[2] + 2
+          local normal_col = normal_pos[2]
+          local diff_rows = {}
+          local normal_rows = {}
+
+          for row = 1, 7 do
+            diff_rows[row] = vim.fn.screenstring(row, diff_col)
+            normal_rows[row] = vim.fn.screenstring(row, normal_col)
+          end
+
+          return { diff_rows, normal_rows }
+        end)
+
+        t.eq({ 'A', ' ', ' ', ' ', '-', '-', 'A' }, rows[1])
+        t.eq({ 'C', 'V', 'V', 'V', ' ', ' ', 'C' }, rows[2])
+      end,
+    })
+  end)
+
   it('works with buffers of different lengths', function()
     n.exec_lua(function()
       vim.api.nvim_buf_set_lines(0, 0, -1, false, { '1', '2', '3' })

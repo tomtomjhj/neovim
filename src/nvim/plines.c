@@ -779,9 +779,45 @@ void getvcols(win_T *wp, pos_T *pos1, pos_T *pos2, colnr_T *left, colnr_T *right
 /// Functions calculating vertical size of text when displayed inside a window.
 /// Calls horizontal size functions defined above.
 
+static bool win_scrollbind_with_diff_fill(win_T *wp)
+{
+  return wp->w_p_scb && wp->w_p_diff;
+}
+
+static bool win_has_scrollbind_diff_fill(win_T *wp)
+{
+  if (!wp->w_p_scb || !diffopt_filler()) {
+    return false;
+  }
+
+  FOR_ALL_WINDOWS_IN_TAB(other, curtab) {
+    if (win_scrollbind_with_diff_fill(other)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+static bool win_has_scrollbind_diff_fill_peer(win_T *wp)
+{
+  if (wp->w_p_diff || !win_has_scrollbind_diff_fill(wp)) {
+    return false;
+  }
+
+  FOR_ALL_WINDOWS_IN_TAB(other, curtab) {
+    if (other != wp && win_scrollbind_with_diff_fill(other)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 static bool win_scrollbind_with_virt_fill(win_T *wp)
 {
-  return wp->w_p_scb && (wp->w_p_diff || vim_strchr(p_sbo, 'v'));
+  return wp->w_p_scb && (wp->w_p_diff || vim_strchr(p_sbo, 'v')
+                         || win_has_scrollbind_diff_fill(wp));
 }
 
 static bool win_has_scrollbind_virt_fill_peer(win_T *wp)
@@ -846,10 +882,15 @@ static void collect_virt_fill_range(win_T *wp, int win_index, int start_row, int
           if (draw_row >= start_row && draw_row < end_row
               && (!apply_folds || !(hasFolding(wp, mrow + 1, NULL, NULL)
                                     || decor_conceal_line(wp, mrow, false)))) {
+            VirtLines virt_lines = vt->data.virt_lines;
+            int count = 0;
+            for (int i = 0; i < (int)kv_size(virt_lines); i++) {
+              count += decor_virt_line_rows(wp, &kv_A(virt_lines, i), 0, NULL);
+            }
             kv_push(*counts, ((VirtFillRangeCount){
               .draw_row = draw_row,
               .win_index = win_index,
-              .count = (int)kv_size(vt->data.virt_lines),
+              .count = count,
             }));
           }
         }
@@ -919,6 +960,21 @@ static int win_get_fill_virt(win_T *wp, linenr_T lnum, bool apply_folds, bool in
   return virt_lines;
 }
 
+static int win_get_fill_diff_peer(win_T *wp, linenr_T lnum)
+{
+  int fill = 0;
+
+  FOR_ALL_WINDOWS_IN_TAB(other, curtab) {
+    if (other == wp || !win_scrollbind_with_diff_fill(other)) {
+      continue;
+    }
+
+    fill = MAX(fill, diff_check_fill(other, lnum));
+  }
+
+  return fill;
+}
+
 static int win_get_fill_virt_range(win_T *wp, linenr_T first, linenr_T last, bool apply_folds,
                                    bool include_peers)
 {
@@ -954,7 +1010,7 @@ bool win_may_fill(win_T *wp)
     return true;
   }
 
-  return win_has_scrollbind_virt_fill_peer(wp);
+  return win_has_scrollbind_virt_fill_peer(wp) || win_has_scrollbind_diff_fill_peer(wp);
 }
 
 /// Return the number of filler lines above "lnum".
@@ -969,7 +1025,9 @@ int win_get_fill(win_T *wp, linenr_T lnum)
 
   // be quick when there are no filler lines
   if (diffopt_filler()) {
-    int n = diff_check_fill(wp, lnum);
+    int n = win_has_scrollbind_diff_fill_peer(wp)
+            ? win_get_fill_diff_peer(wp, lnum)
+            : diff_check_fill(wp, lnum);
 
     if (n > 0) {
       return virt_lines + n;
@@ -1184,7 +1242,9 @@ int plines_m_win_fill(win_T *wp, linenr_T first, linenr_T last)
   if (diffopt_filler()) {
     for (int lnum = first; lnum <= last; lnum++) {
       // Note: this also considers folds (no filler lines inside folds).
-      int n = diff_check_fill(wp, lnum);
+      int n = win_has_scrollbind_diff_fill_peer(wp)
+              ? win_get_fill_diff_peer(wp, lnum)
+              : diff_check_fill(wp, lnum);
       count += MAX(n, 0);
     }
   }
