@@ -2381,6 +2381,13 @@ describe('api/buf', function()
       eq(false, pcall(api.nvim_buf_set_mark, 0, '!', 1, 0, {}))
       eq(false, pcall(api.nvim_buf_set_mark, 0, 'fail', 1, 0, {}))
     end)
+    it('fails when mark position is invalid', function()
+      api.nvim_buf_set_lines(0, -1, -1, true, { 'a', 'bit of', 'text' })
+      eq(
+        "Invalid 'column': out of range",
+        pcall_err(api.nvim_buf_set_mark, 0, 'z', 1, -1, {})
+      )
+    end)
     it('fails when invalid buffer number is used', function()
       eq(false, pcall(api.nvim_buf_set_mark, 99, 'a', 1, 1, {}))
     end)
