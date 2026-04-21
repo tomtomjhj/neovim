@@ -1564,10 +1564,11 @@ bool parse_cmdline(char **cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, const ch
   };
 
   char *orig_cmd = eap->cmd;
-  // If parse command modifiers failed but modifiers were passed, continue
+  // If parse command modifiers failed but modifiers were passed, continue.
+  // Modifier parsing can set eap->cmd to NULL for invalid ranges.
   int result = parse_command_modifiers(eap, errormsg, &cmdinfo->cmdmod, false);
   after_modifier = eap->cmd;
-  if (result == FAIL && after_modifier == orig_cmd) {
+  if (result == FAIL && (after_modifier == orig_cmd || after_modifier == NULL)) {
     goto end;
   }
 
