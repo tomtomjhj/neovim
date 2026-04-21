@@ -118,6 +118,12 @@ describe('API: set highlight', function()
     )
     -- 'url' is rejected. #38162
     eq("Invalid key: 'url'", pcall_err(api.nvim_set_hl, 0, 'Test', { url = 'https://example.com' }))
+    eq("Invalid 'namespace': -1", pcall_err(api.nvim_set_hl, -1, 'Test', {}))
+    eq("Invalid 'namespace': 2147483648", pcall_err(api.nvim_set_hl, 2147483648, 'Test', {}))
+    eq(
+      "Invalid 'namespace': 2147483648",
+      pcall_err(api.nvim_get_hl, 2147483648, { name = 'Test' })
+    )
     assert_alive()
   end)
 
@@ -748,6 +754,8 @@ describe('API: set/get highlight namespace', function()
     local ns = api.nvim_create_namespace('')
     api.nvim_set_hl_ns(ns)
     eq(ns, api.nvim_get_hl_ns({}))
+    eq("Invalid 'namespace': 2147483648", pcall_err(api.nvim_set_hl_ns, 2147483648))
+    eq("Invalid 'namespace': 2147483648", pcall_err(api.nvim_set_hl_ns_fast, 2147483648))
   end)
 
   it('set/get window highlight namespace', function()
@@ -755,6 +763,7 @@ describe('API: set/get highlight namespace', function()
     local ns = api.nvim_create_namespace('')
     api.nvim_win_set_hl_ns(0, ns)
     eq(ns, api.nvim_get_hl_ns({ winid = 0 }))
+    eq("Invalid 'namespace': 2147483648", pcall_err(api.nvim_win_set_hl_ns, 0, 2147483648))
   end)
 
   it('setting namespace takes priority over &winhighlight', function()

@@ -93,6 +93,31 @@ describe('decorations providers', function()
     assert_alive()
   end)
 
+  it('validates decoration provider namespace ids', function()
+    eq(
+      "Invalid 'ns_id': 0",
+      exec_lua [[
+        local ok, err = pcall(vim.api.nvim_set_decoration_provider, 0, {})
+        return ok and nil or err
+      ]]
+    )
+    eq(
+      "Invalid 'ns_id': -1",
+      exec_lua [[
+        local ok, err = pcall(vim.api.nvim_set_decoration_provider, -1, {})
+        return ok and nil or err
+      ]]
+    )
+    eq(
+      "Invalid 'ns_id': 2147483648",
+      exec_lua [[
+        local ok, err = pcall(vim.api.nvim_set_decoration_provider, 2147483648, {})
+        return ok and nil or err
+      ]]
+    )
+    assert_alive()
+  end)
+
   it('leave a trace', function()
     insert(mulholland)
 

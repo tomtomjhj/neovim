@@ -1,3 +1,4 @@
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -445,7 +446,7 @@ void nvim_win_set_hl_ns(Window win, Integer ns_id, Error *err)
   }
 
   // -1 is allowed as inherit global namespace
-  VALIDATE_S((ns_id >= -1), "namespace", "", {
+  VALIDATE_INT((ns_id >= -1 && ns_id <= INT_MAX), "namespace", ns_id, {
     return;
   });
 

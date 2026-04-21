@@ -122,6 +122,11 @@ Integer nvim_get_hl_id_by_name(String name, Error *err)
 DictAs(get_hl_info) nvim_get_hl(Integer ns_id, Dict(get_highlight) *opts, Arena *arena, Error *err)
   FUNC_API_SINCE(11)
 {
+  Dict rv = KEYDICT_INIT;
+  VALIDATE_INT((ns_id >= 0 && ns_id <= INT_MAX), "namespace", ns_id, {
+    return rv;
+  });
+
   return ns_get_hl_defs((NS)ns_id, opts, arena, err);
 }
 
@@ -179,6 +184,10 @@ DictAs(get_hl_info) nvim_get_hl(Integer ns_id, Dict(get_highlight) *opts, Arena 
 void nvim_set_hl(uint64_t channel_id, Integer ns_id, String name, Dict(highlight) *val, Error *err)
   FUNC_API_SINCE(7)
 {
+  VALIDATE_INT((ns_id >= 0 && ns_id <= INT_MAX), "namespace", ns_id, {
+    return;
+  });
+
   int hl_id;
   TRY_WRAP(err, {
     hl_id = syn_check_group(name.data, name.size);
@@ -240,7 +249,7 @@ Integer nvim_get_hl_ns(Dict(get_ns) *opts, Error *err)
 void nvim_set_hl_ns(Integer ns_id, Error *err)
   FUNC_API_SINCE(10)
 {
-  VALIDATE_INT((ns_id >= 0), "namespace", ns_id, {
+  VALIDATE_INT((ns_id >= 0 && ns_id <= INT_MAX), "namespace", ns_id, {
     return;
   });
 
@@ -261,6 +270,10 @@ void nvim_set_hl_ns_fast(Integer ns_id, Error *err)
   FUNC_API_SINCE(10)
   FUNC_API_FAST
 {
+  VALIDATE_INT((ns_id >= 0 && ns_id <= INT_MAX), "namespace", ns_id, {
+    return;
+  });
+
   ns_hl_fast = (NS)ns_id;
   hl_check_ns();
 }

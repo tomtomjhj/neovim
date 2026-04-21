@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <lauxlib.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -1093,6 +1094,10 @@ void nvim_buf_clear_namespace(Buffer buf, Integer ns_id, Integer line_start, Int
 void nvim_set_decoration_provider(Integer ns_id, Dict(set_decoration_provider) *opts, Error *err)
   FUNC_API_SINCE(7) FUNC_API_LUA_ONLY
 {
+  VALIDATE_INT((ns_id > 0 && ns_id <= INT_MAX), "ns_id", ns_id, {
+    return;
+  });
+
   DecorProvider *p = get_decor_provider((NS)ns_id, true);
   assert(p != NULL);
   decor_provider_clear(p);
