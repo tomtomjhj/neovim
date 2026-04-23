@@ -716,13 +716,11 @@ t2]])
       {4:-- INSERT --}                            |
     ]])
 
-    -- TODO(tomtomjhj): `u` spuriously opens the fold (#26499).
     feed('<Esc>uzMggzodd')
     screen:expect([[
       {1:-}^t1                                     |
-      {1:-}# h2                                   |
-      {1:│}t2                                     |
-      {3:~                                       }|*4
+      {1:+}{2:+--  2 lines: # h2·····················}|
+      {3:~                                       }|*5
       1 line less; before #2  {MATCH:.*}|
     ]])
   end)

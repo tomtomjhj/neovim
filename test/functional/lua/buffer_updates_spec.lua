@@ -542,6 +542,35 @@ describe('lua: nvim_buf_attach on_bytes', function()
     return check_events
   end
 
+  it('fires before foldexpr during undo #26499', function()
+    exec_lua(function()
+      _G.order = {}
+      _G.Fde = function(lnum)
+        table.insert(_G.order, 'foldexpr ' .. lnum)
+        return 0
+      end
+      vim.opt.foldmethod = 'expr'
+      vim.opt.foldexpr = 'v:lua.Fde(v:lnum)'
+      vim.api.nvim_buf_attach(0, false, {
+        on_bytes = function()
+          table.insert(_G.order, 'on_bytes')
+        end,
+      })
+      vim.fn.foldlevel(1)
+      _G.order = {}
+    end)
+
+    feed('o<Esc>')
+    eq({ 'on_bytes', 'foldexpr 1', 'foldexpr 2' }, exec_lua(function()
+      local order = _G.order
+      _G.order = {}
+      return order
+    end))
+
+    feed('u')
+    eq({ 'on_bytes', 'foldexpr 1' }, exec_lua('return _G.order'))
+  end)
+
   -- Yes, we can do both
   local function do_both(verify)
     it('single and multiple join', function()
@@ -752,13 +781,13 @@ describe('lua: nvim_buf_attach on_bytes', function()
       feed(':%s/bcd/')
       check_events {
         { 'test1', 'bytes', 1, 3, 0, 1, 1, 0, 3, 3, 0, 0, 0 },
-        { 'test1', 'bytes', 1, 5, 0, 1, 1, 0, 0, 0, 0, 3, 3 },
+        { 'test1', 'bytes', 1, 4, 0, 1, 1, 0, 0, 0, 0, 3, 3 },
       }
 
       feed('a')
       check_events {
         { 'test1', 'bytes', 1, 3, 0, 1, 1, 0, 3, 3, 0, 1, 1 },
-        { 'test1', 'bytes', 1, 5, 0, 1, 1, 0, 1, 1, 0, 3, 3 },
+        { 'test1', 'bytes', 1, 4, 0, 1, 1, 0, 1, 1, 0, 3, 3 },
       }
 
       feed('<esc>')
@@ -767,7 +796,7 @@ describe('lua: nvim_buf_attach on_bytes', function()
       feed([[:%s/abc/\r]])
       check_events {
         { 'test1', 'bytes', 1, 3, 0, 0, 0, 0, 3, 3, 1, 0, 1 },
-        { 'test1', 'bytes', 1, 6, 0, 0, 0, 1, 0, 1, 0, 3, 3 },
+        { 'test1', 'bytes', 1, 4, 0, 0, 0, 1, 0, 1, 0, 3, 3 },
       }
 
       feed('<esc>')
@@ -776,7 +805,7 @@ describe('lua: nvim_buf_attach on_bytes', function()
 
       check_events {
         { 'test1', 'bytes', 1, 3, 0, 3, 3, 1, 3, 6, 0, 1, 1 },
-        { 'test1', 'bytes', 1, 6, 0, 3, 3, 0, 1, 1, 1, 3, 6 },
+        { 'test1', 'bytes', 1, 4, 0, 3, 3, 0, 1, 1, 1, 3, 6 },
       }
 
       feed('<esc>')
@@ -785,7 +814,7 @@ describe('lua: nvim_buf_attach on_bytes', function()
 
       check_events {
         { 'test1', 'bytes', 1, 3, 0, 1, 1, 0, 1, 1, 0, 3, 3 },
-        { 'test1', 'bytes', 1, 5, 0, 1, 1, 0, 3, 3, 0, 1, 1 },
+        { 'test1', 'bytes', 1, 4, 0, 1, 1, 0, 3, 3, 0, 1, 1 },
       }
 
       feed('<esc>')
@@ -793,7 +822,7 @@ describe('lua: nvim_buf_attach on_bytes', function()
       feed([[:%s/b/\=5+5]])
       check_events {
         { 'test1', 'bytes', 1, 3, 0, 1, 1, 0, 1, 1, 0, 2, 2 },
-        { 'test1', 'bytes', 1, 5, 0, 1, 1, 0, 2, 2, 0, 1, 1 },
+        { 'test1', 'bytes', 1, 4, 0, 1, 1, 0, 2, 2, 0, 1, 1 },
       }
 
       feed('<esc>')
@@ -801,7 +830,7 @@ describe('lua: nvim_buf_attach on_bytes', function()
       feed([[:%s/b/\\]])
       check_events {
         { 'test1', 'bytes', 1, 3, 0, 1, 1, 0, 1, 1, 0, 1, 1 },
-        { 'test1', 'bytes', 1, 5, 0, 1, 1, 0, 1, 1, 0, 1, 1 },
+        { 'test1', 'bytes', 1, 4, 0, 1, 1, 0, 1, 1, 0, 1, 1 },
       }
 
       feed('<esc>')
@@ -809,7 +838,7 @@ describe('lua: nvim_buf_attach on_bytes', function()
       feed([[:%s/b/\='\']])
       check_events {
         { 'test1', 'bytes', 1, 3, 0, 1, 1, 0, 1, 1, 0, 1, 1 },
-        { 'test1', 'bytes', 1, 5, 0, 1, 1, 0, 1, 1, 0, 1, 1 },
+        { 'test1', 'bytes', 1, 4, 0, 1, 1, 0, 1, 1, 0, 1, 1 },
       }
 
       feed('<esc>')
@@ -817,7 +846,7 @@ describe('lua: nvim_buf_attach on_bytes', function()
       feed([[:%s/b/\\!]])
       check_events {
         { 'test1', 'bytes', 1, 3, 0, 1, 1, 0, 1, 1, 0, 2, 2 },
-        { 'test1', 'bytes', 1, 5, 0, 1, 1, 0, 2, 2, 0, 1, 1 },
+        { 'test1', 'bytes', 1, 4, 0, 1, 1, 0, 2, 2, 0, 1, 1 },
       }
 
       feed('<esc>')
@@ -825,7 +854,7 @@ describe('lua: nvim_buf_attach on_bytes', function()
       feed([[:%s/b/\='\!']])
       check_events {
         { 'test1', 'bytes', 1, 3, 0, 1, 1, 0, 1, 1, 0, 2, 2 },
-        { 'test1', 'bytes', 1, 5, 0, 1, 1, 0, 2, 2, 0, 1, 1 },
+        { 'test1', 'bytes', 1, 4, 0, 1, 1, 0, 2, 2, 0, 1, 1 },
       }
     end)
 
@@ -940,7 +969,7 @@ describe('lua: nvim_buf_attach on_bytes', function()
       -- check we can undo and redo a reload event.
       feed 'u'
       check_events {
-        { 'test1', 'bytes', 1, 8, 0, 10, 10, 0, 1, 1, 1, 0, 1 },
+        { 'test1', 'bytes', 1, 7, 0, 10, 10, 0, 1, 1, 1, 0, 1 },
       }
 
       feed 'u'
@@ -955,7 +984,7 @@ describe('lua: nvim_buf_attach on_bytes', function()
 
       feed '<c-r>'
       check_events {
-        { 'test1', 'bytes', 1, 14, 0, 10, 10, 1, 0, 1, 0, 1, 1 },
+        { 'test1', 'bytes', 1, 13, 0, 10, 10, 1, 0, 1, 0, 1, 1 },
       }
     end)
 
@@ -984,8 +1013,8 @@ describe('lua: nvim_buf_attach on_bytes', function()
 
       feed('<esc>u')
       check_events {
-        { 'test1', 'bytes', 1, 9, 0, 0, 0, 0, 1, 1, 0, 4, 4 },
-        { 'test1', 'bytes', 1, 9, 0, 0, 0, 0, 4, 4, 0, 0, 0 },
+        { 'test1', 'bytes', 1, 8, 0, 0, 0, 0, 1, 1, 0, 4, 4 },
+        { 'test1', 'bytes', 1, 8, 0, 0, 0, 0, 4, 4, 0, 0, 0 },
       }
 
       -- in REPLACE mode
@@ -999,9 +1028,9 @@ describe('lua: nvim_buf_attach on_bytes', function()
       }
       feed('<esc>u')
       check_events {
-        { 'test1', 'bytes', 1, 16, 0, 0, 0, 0, 1, 1, 0, 4, 4 },
-        { 'test1', 'bytes', 1, 16, 0, 2, 2, 0, 2, 2, 0, 1, 1 },
-        { 'test1', 'bytes', 1, 16, 0, 0, 0, 0, 2, 2, 0, 1, 1 },
+        { 'test1', 'bytes', 1, 15, 0, 0, 0, 0, 1, 1, 0, 4, 4 },
+        { 'test1', 'bytes', 1, 15, 0, 2, 2, 0, 2, 2, 0, 1, 1 },
+        { 'test1', 'bytes', 1, 15, 0, 0, 0, 0, 2, 2, 0, 1, 1 },
       }
 
       -- in VISUALREPLACE mode
@@ -1087,15 +1116,15 @@ describe('lua: nvim_buf_attach on_bytes', function()
       eq({ '345', 'hello world' }, api.nvim_buf_get_lines(0, 0, -1, true))
 
       check_events {
-        { 'test1', 'bytes', 2, 6, 1, 0, 12, 1, 0, 4, 0, 0, 0 },
-        { 'test1', 'bytes', 2, 6, 0, 0, 0, 0, 0, 0, 1, 0, 4 },
+        { 'test1', 'bytes', 2, 4, 1, 0, 12, 1, 0, 4, 0, 0, 0 },
+        { 'test1', 'bytes', 2, 4, 0, 0, 0, 0, 0, 0, 1, 0, 4 },
       }
 
       feed('u')
       eq({ '12345', 'hello world' }, api.nvim_buf_get_lines(0, 0, -1, true))
 
       check_events {
-        { 'test1', 'bytes', 2, 8, 0, 0, 0, 0, 0, 0, 0, 2, 2 },
+        { 'test1', 'bytes', 2, 7, 0, 0, 0, 0, 0, 0, 0, 2, 2 },
       }
       command('bw!')
     end)

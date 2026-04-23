@@ -2239,6 +2239,13 @@ target_zero:
   u_undo_end(did_undo, absolute, false);
 }
 
+typedef struct {
+  linenr_T lnum;
+  colnr_T col;
+  linenr_T lnume;
+  linenr_T xtra;
+} u_change_event_T;
+
 /// u_undoredo: common code for undo and redo
 ///
 /// The lines in the file are replaced by the lines in the entry list at
@@ -2256,6 +2263,8 @@ static void u_undoredo(bool undo, bool do_buf_event)
   u_entry_T *newlist = NULL;
   fmark_T namedm[NMARKS];
   u_header_T *curhead = curbuf->b_u_curhead;
+  // Defer changed_lines() until extmark undo replay has sent on_bytes.
+  kvec_t(u_change_event_T) changes = KV_INITIAL_VALUE;
 
   // Don't want autocommands using the undo structures here, they are
   // invalid till the end.
@@ -2287,6 +2296,7 @@ static void u_undoredo(bool undo, bool do_buf_event)
     }
     if (top > curbuf->b_ml.ml_line_count || top >= bot
         || bot > curbuf->b_ml.ml_line_count + 1) {
+      kv_destroy(changes);
       unblock_autocmds();
       iemsg(_("E438: u_undo: line numbers wrong"));
       changed(curbuf);                // don't want UNCHANGED now
@@ -2382,7 +2392,12 @@ static void u_undoredo(bool undo, bool do_buf_event)
     }
 
     if (oldsize > 0 || newsize > 0) {
-      changed_lines(curbuf, top + 1, 0, bot, newsize - oldsize, do_buf_event);
+      kv_push(changes, ((u_change_event_T){
+        .lnum = top + 1,
+        .col = 0,
+        .lnume = bot,
+        .xtra = newsize - oldsize,
+      }));
       // When text has been changed, possibly the start of the next line
       // may have SpellCap that should be removed or it needs to be
       // displayed.  Schedule the next line for redrawing just in case.
@@ -2427,6 +2442,13 @@ static void u_undoredo(bool undo, bool do_buf_event)
       extmark_apply_undo(kv_A(curhead->uh_extmark, i), undo);
     }
   }
+
+  for (size_t i = 0; i < kv_size(changes); i++) {
+    changed_lines(curbuf, kv_A(changes, i).lnum, kv_A(changes, i).col,
+                  kv_A(changes, i).lnume, kv_A(changes, i).xtra, do_buf_event);
+  }
+  kv_destroy(changes);
+
   if (curhead->uh_flags & UH_RELOAD) {
     // TODO(bfredl): this is a bit crude. When 'undoreload' is used we
     // should have all info to send a buffer-reloaing on_lines/on_bytes event
